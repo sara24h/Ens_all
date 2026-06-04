@@ -43,13 +43,20 @@ def initialize_model(model_name, device):
     if model_name == 'resnet50':
         model = models.resnet50(weights='IMAGENET1K_V1')
         num_ftrs = model.fc.in_features
-        model.fc = nn.Linear(num_ftrs, 1)
+        model.fc = nn.Sequential(
+            nn.Dropout(p=0.4),
+            nn.Linear(num_ftrs, 1)
+        )
         for param in model.parameters():
             param.requires_grad = False
+            
+        for param in model.layer3.parameters():
+            param.requires_grad = True
         for param in model.layer4.parameters():
             param.requires_grad = True
         for param in model.fc.parameters():
             param.requires_grad = True
+            
     elif model_name == 'mobilenetv2':
         model = models.mobilenet_v2(weights='IMAGENET1K_V1')
         num_ftrs = model.classifier[1].in_features
@@ -161,9 +168,10 @@ if __name__ == "__main__":
     model = initialize_model(model_name, device)
 
     criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.Adam([
-        {'params': [p for p in model.parameters() if p.requires_grad], 'lr': lr}
-    ], weight_decay=1e-4)
+    # استفاده از AdamW با لرنینگ ریت کمتر
+    optimizer = optim.AdamW([
+        {'params': [p for p in model.parameters() if p.requires_grad], 'lr': 5e-5}
+    ], weight_decay=1e-3)
 
     scaler = GradScaler('cuda') if device.type == 'cuda' else None
 

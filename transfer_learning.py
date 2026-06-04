@@ -175,6 +175,8 @@ if __name__ == "__main__":
 
     scaler = GradScaler('cuda') if device.type == 'cuda' else None
 
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=2)
+
     if device.type == 'cuda':
         torch.cuda.empty_cache()
 

@@ -79,34 +79,37 @@ def train():
     scaler = torch.cuda.amp.GradScaler()
     
     # ۵. حلقه اصلی آموزش
-    # در فایل train.py (داخل حلقه آموزش)
-
-    for i, (images, labels) in enumerate(progress_bar):
-    # ۱. خواندن خروجی معلم از کش (ترتیب دقیقاً با DataLoader یکی است)
-        t_logits, t_features, _ = teacher_cache[i] 
-        t_logits, t_features = t_logits.to(device), t_features.to(device)
-        images, labels = images.to(device), labels.to(device)
-    
-        optimizer.zero_grad()
-    
-    # ۲. استفاده از Mixed Precision برای دانش‌آموز
-        with torch.amp.autocast('cuda'):
-        # حالا فقط مدل دانش‌آموز اجرا می‌شود (بسیار سریع‌تر!)
-            s_logits, s_features = student(images)
+    # ۵. حلقه اصلی آموزش
+    # ۵. حلقه اصلی آموزش
+    # ۵. حلقه اصلی آموزش
+    for epoch in range(args.epochs):
+        student.train()
+        progress_bar = tqdm(selector.loader_train, desc=f"Epoch {epoch+1}/{args.epochs}", unit="batch")
         
-        # ۳. محاسبه Loss (همان منطق قبلی شما)
-            if args.kd_method == 'response':
-                loss = criterion(s_logits, t_logits, labels)
-            else:
-            # در اینجا از خروجی‌های کش شده معلم (t_features) استفاده می‌کنید
-                loss = criterion(s_logits, s_features, t_features, labels)
+        for images, labels in progress_bar:
+            images, labels = images.to(device), labels.to(device)
+            optimizer.zero_grad()
             
-    # ۴. بک‌وارد (Backpropagation)
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
-    
-        progress_bar.set_postfix(loss=f"{loss.item():.4f}")
+            # --- شروع تغییرات Mixed Precision ---
+            with torch.cuda.amp.autocast():
+                # فوروارد معلم و دانش‌آموز داخل اتوکست
+                with torch.no_grad():
+                    t_logits, t_features = teacher(images)
+                s_logits, s_features = student(images)
+                
+                # محاسبه اتلاف
+                if args.kd_method == 'response':
+                    loss = criterion(s_logits, t_logits, labels)
+                else:
+                    loss = criterion(s_logits, s_features, t_features, labels)
+            
+            # استفاده از scaler برای backward
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            # --- پایان تغییرات ---
+            
+            progress_bar.set_postfix(loss=f"{loss.item():.4f}")
         
     # ۶. ذخیره وزن‌ها (خارج از حلقه epoch قرار می‌گیرد)
     save_path = os.path.join(args.save_dir, f"student_{args.dataset}_{args.kd_method}.pth")

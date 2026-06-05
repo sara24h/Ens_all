@@ -1,316 +1,106 @@
-"""
-Training loops for the three Knowledge Distillation methods.
-
-  1. train_logits()  — Response-based KD  (Eq. 3)
-  2. train_at()      — Feature-based KD   (Eq. 5)
-  3. train_rkd()     — Relation-based KD  (Eq. 8)
-
-Each function supports:
-  - Single-teacher mode  (one teacher on its dataset)
-  - Multi-teacher mode   (distillation loss averaged over all teachers)
-"""
-
+# train.py
 import os
-import sys
-import copy
+import argparse
 import torch
 import torch.optim as optim
-import numpy as np
-from tqdm import tqdm
-from sklearn.metrics import accuracy_score
+from dataset import Dataset_selector
+from models import get_resnet50, DistillationWrapper
+from losses import ResponseKDLoss, FeatureKDLoss, RelationKDLoss
 
-# Add project root to Python path
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+def parse_args():
+    parser = argparse.ArgumentParser(description="Knowledge Distillation Training for DeepFake")
+    parser.add_argument('--dataset', type=str, required=True, choices=['140k', '190k', '200k'])
+    parser.add_argument('--kd_method', type=str, required=True, choices=['response', 'feature', 'relation'])
+    parser.add_argument('--teacher_ckpt', type=str, required=True, help="Path to teacher checkpoint")
+    parser.add_argument('--save_dir', type=str, default='./checkpoints')
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--lr', type=float, default=1e-4)
+    return parser.parse_args()
 
-from models import ResNet50WithFeatures
-from losses import StudentLoss, LogitsDistillationLoss, AttentionTransferLoss, RKDLoss
-
-
-# ═══════════════════════════════════════════════════════════════════
-# 1. Response-based KD  (Logits) — Eq. 3
-# ═══════════════════════════════════════════════════════════════════
-
-def train_logits(teacher_models, train_loader, val_loader,
-                 num_epochs=50, lr=0.01, alpha=1.0, beta=0.5,
-                 num_classes=1, device='cuda',
-                 save_path='student_logits_best.pth'):
-    """
-    Train student with Response-based KD (Logits MSE).
-    Eq. 3: L = α · L_S + β · L_logits
-
-    Args:
-        teacher_models: list of teacher models OR a single model
-        train_loader:   training DataLoader
-        val_loader:     validation DataLoader
-        num_epochs:     number of training epochs
-        lr:             learning rate
-        alpha:          student loss weight
-        beta:           distillation loss weight
-        device:         'cuda' or 'cpu'
-        save_path:      path to save best model checkpoint
-    """
-    print("\n" + "=" * 70)
-    print("  Response-based KD (Logits) — Eq. 3")
-    print("=" * 70)
-
-    # ── Setup ──
-    student = ResNet50WithFeatures(num_classes=num_classes, pretrained=True).to(device)
-    if not isinstance(teacher_models, list):
-        teacher_models = [teacher_models]
-    for t in teacher_models:
-        t.to(device); t.eval()
-
-    student_loss_fn = StudentLoss()
-    logits_loss_fn  = LogitsDistillationLoss()
-    optimizer = optim.SGD(student.parameters(), lr=lr, momentum=0.9,
-                          weight_decay=5e-4, nesterov=True)
-    scheduler = optim.lr_scheduler.MultiStepLR(
-        optimizer,
-        milestones=[int(num_epochs * m) for m in [0.5, 0.75]],
-        gamma=0.1,
+def train():
+    args = parse_args()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    os.makedirs(args.save_dir, exist_ok=True)
+    
+    # ۱. بارگذاری دیتابیس بر اساس آرگومان ورودی
+    print(f"Initializing {args.dataset} dataset...")
+    # متغیرهای مسیرها را بر اساس محیط سیستم یا کگل خود بازتنظیم کنید
+    selector = Dataset_selector(
+        dataset_mode=args.dataset,
+        realfake140k_train_csv='/kaggle/input/140k-real-and-fake-faces/train.csv',
+        realfake140k_valid_csv='/kaggle/input/140k-real-and-fake-faces/valid.csv',
+        realfake140k_test_csv='/kaggle/input/140k-real-and-fake-faces/test.csv',
+        realfake140k_root_dir='/kaggle/input/140k-real-and-fake-faces',
+        realfake200k_train_csv='/kaggle/input/undersampled-200k/balanced_unique_200k_dataset/train_labels.csv',
+        realfake200k_val_csv='/kaggle/input/undersampled-200k/balanced_unique_200k_dataset/val_labels.csv',
+        realfake200k_test_csv='/kaggle/input/undersampled-200k/balanced_unique_200k_dataset/test_labels.csv',
+        realfake200k_root_dir='/kaggle/input/undersampled-200k/balanced_unique_200k_dataset',
+        realfake190k_root_dir='/kaggle/input/deepfake-and-real-images/Dataset',
+        train_batch_size=args.batch_size,
+        eval_batch_size=args.batch_size
     )
-
-    best_acc, best_state = 0.0, None
-
-    # ── Training loop ──
-    for epoch in range(num_epochs):
+    
+    # ۲. راه‌اندازی مدل معلم و قرار دادن در رپر هوک
+    print("Loading Teacher model...")
+    teacher_base = get_resnet50(num_classes=2, checkpoint_path=args.teacher_ckpt)
+    teacher = DistillationWrapper(teacher_base).to(device)
+    teacher.eval() # مدل معلم همیشه در حالت eval است
+    
+    # ۳. راه‌اندازی مدل دانش‌آموز
+    print("Initializing Student model (ResNet-50)...")
+    student_base = get_resnet50(num_classes=2, checkpoint_path=None)
+    student = DistillationWrapper(student_base).to(device)
+    
+    # ۴. تعیین تابع اتلاف براساس روش انتخابی
+    if args.kd_method == 'response':
+        criterion = ResponseKDLoss(alpha=0.5, temperature=4.0)
+    elif args.kd_method == 'feature':
+        criterion = FeatureKDLoss(beta=1.0)
+    elif args.kd_method == 'relation':
+        criterion = RelationKDLoss(gamma=1.0)
+        
+    optimizer = optim.Adam(student.parameters(), lr=args.lr)
+    
+    # ۵. حلقه اصلی آموزش
+    for epoch in range(args.epochs):
         student.train()
-        running_loss, preds_list, labels_list = 0.0, [], []
-
-        pbar = tqdm(train_loader, desc=f"Logits Epoch {epoch+1}/{num_epochs}")
-        for images, labels in pbar:
+        running_loss = 0.0
+        correct, total = 0, 0
+        
+        for images, labels in selector.loader_train:
             images, labels = images.to(device), labels.to(device)
-
-            # Teacher forward
-            with torch.no_grad():
-                t_logits_list = [t(images) for t in teacher_models]
-
-            # Student forward
-            s_logits = student(images)
-
-            # Loss
-            l_s  = student_loss_fn(s_logits, labels)
-            l_kd = torch.stack(
-                [logits_loss_fn(tl, s_logits) for tl in t_logits_list]
-            ).mean()
-            loss = alpha * l_s + beta * l_kd
-
             optimizer.zero_grad()
+            
+            # فوروارد معلم بدون محاسبه گرادیان
+            with torch.no_grad():
+                t_logits, t_features = teacher(images)
+                
+            # فوروارد دانش‌آموز
+            s_logits, s_features = student(images)
+            
+            # محاسبه تابع هزینه مخصوص روش تقطیر
+            if args.kd_method == 'response':
+                loss = criterion(s_logits, t_logits, labels)
+            else:
+                loss = criterion(s_logits, s_features, t_features, labels)
+                
             loss.backward()
             optimizer.step()
+            
+            running_loss += loss.item() * images.size(0)
+            _, predicted = s_logits.max(1)
+            total += labels.size(0)
+            correct += predicted.eq(labels).sum().item()
+            
+        epoch_loss = running_loss / total
+        epoch_acc = 100. * correct / total
+        print(f"Epoch [{epoch+1}/{args.epochs}] | Loss: {epoch_loss:.4f} | Acc: {epoch_acc:.2f}%")
+        
+    # ذخیره وزن‌های نهایی دانش‌آموز
+    save_path = os.path.join(args.save_dir, f"student_{args.dataset}_{args.kd_method}.pth")
+    torch.save(student.model.state_dict(), save_path)
+    print(f"Saved student model weights to {save_path}\n")
 
-            running_loss += loss.item()
-            preds_list.extend(
-                (torch.sigmoid(s_logits) > 0.5).float().squeeze().cpu().numpy()
-            )
-            labels_list.extend(labels.cpu().numpy())
-            pbar.set_postfix({'loss': f'{loss.item():.4f}'})
-
-        train_acc = accuracy_score(labels_list, preds_list)
-        val_m = _quick_eval(student, val_loader, device)
-        scheduler.step()
-
-        print(f"  Epoch {epoch+1}: loss={running_loss/len(train_loader):.4f}  "
-              f"train_acc={train_acc:.4f}  val_acc={val_m:.4f}")
-
-        if val_m > best_acc:
-            best_acc = val_m
-            best_state = copy.deepcopy(student.state_dict())
-            os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
-            torch.save(best_state, save_path)
-            print(f"    -> Saved best (val_acc={best_acc:.4f})")
-
-    student.load_state_dict(best_state)
-    return student
-
-
-# ═══════════════════════════════════════════════════════════════════
-# 2. Feature-based KD (Attention Transfer) — Eq. 5
-# ═══════════════════════════════════════════════════════════════════
-
-def train_at(teacher_models, train_loader, val_loader,
-             num_epochs=50, lr=0.01, num_classes=1, device='cuda',
-             save_path='student_at_best.pth'):
-    """
-    Train student with Feature-based KD (Attention Transfer).
-    Eq. 5: L = L_S + L_AT
-    """
-    print("\n" + "=" * 70)
-    print("  Feature-based KD (Attention Transfer) — Eq. 5")
-    print("=" * 70)
-
-    student = ResNet50WithFeatures(num_classes=num_classes, pretrained=True).to(device)
-    if not isinstance(teacher_models, list):
-        teacher_models = [teacher_models]
-    for t in teacher_models:
-        t.to(device); t.eval()
-
-    student_loss_fn = StudentLoss()
-    at_loss_fn      = AttentionTransferLoss()
-    optimizer = optim.SGD(student.parameters(), lr=lr, momentum=0.9,
-                          weight_decay=5e-4, nesterov=True)
-    scheduler = optim.lr_scheduler.MultiStepLR(
-        optimizer,
-        milestones=[int(num_epochs * m) for m in [0.5, 0.75]],
-        gamma=0.1,
-    )
-
-    best_acc, best_state = 0.0, None
-
-    for epoch in range(num_epochs):
-        student.train()
-        running_loss, preds_list, labels_list = 0.0, [], []
-
-        pbar = tqdm(train_loader, desc=f"AT Epoch {epoch+1}/{num_epochs}")
-        for images, labels in pbar:
-            images, labels = images.to(device), labels.to(device)
-
-            with torch.no_grad():
-                t_attn_list = [
-                    t(images, return_attention=True)[1] for t in teacher_models
-                ]
-
-            s_logits, s_attn = student(images, return_attention=True)
-
-            l_s  = student_loss_fn(s_logits, labels)
-            l_at = torch.stack(
-                [at_loss_fn(ta, s_attn) for ta in t_attn_list]
-            ).mean()
-            loss = l_s + l_at
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-            preds_list.extend(
-                (torch.sigmoid(s_logits) > 0.5).float().squeeze().cpu().numpy()
-            )
-            labels_list.extend(labels.cpu().numpy())
-            pbar.set_postfix({'loss': f'{loss.item():.4f}'})
-
-        train_acc = accuracy_score(labels_list, preds_list)
-        val_m = _quick_eval(student, val_loader, device)
-        scheduler.step()
-
-        print(f"  Epoch {epoch+1}: loss={running_loss/len(train_loader):.4f}  "
-              f"train_acc={train_acc:.4f}  val_acc={val_m:.4f}")
-
-        if val_m > best_acc:
-            best_acc = val_m
-            best_state = copy.deepcopy(student.state_dict())
-            os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
-            torch.save(best_state, save_path)
-            print(f"    -> Saved best (val_acc={best_acc:.4f})")
-
-    student.load_state_dict(best_state)
-    return student
-
-
-# ═══════════════════════════════════════════════════════════════════
-# 3. Relation-based KD (RKD) — Eq. 8
-# ═══════════════════════════════════════════════════════════════════
-
-def train_rkd(teacher_models, train_loader, val_loader,
-              num_epochs=50, lr=0.01,
-              distance_weight=1.0, angle_weight=2.0,
-              num_classes=1, device='cuda',
-              save_path='student_rkd_best.pth'):
-    """
-    Train student with Relation-based KD (RKD).
-    Eq. 8: L = L_S + L_RKD
-    """
-    print("\n" + "=" * 70)
-    print("  Relation-based KD (RKD) — Eq. 8")
-    print("=" * 70)
-
-    student = ResNet50WithFeatures(num_classes=num_classes, pretrained=True).to(device)
-    if not isinstance(teacher_models, list):
-        teacher_models = [teacher_models]
-    for t in teacher_models:
-        t.to(device); t.eval()
-
-    student_loss_fn = StudentLoss()
-    rkd_loss_fn     = RKDLoss(distance_weight, angle_weight)
-    optimizer = optim.SGD(student.parameters(), lr=lr, momentum=0.9,
-                          weight_decay=5e-4, nesterov=True)
-    scheduler = optim.lr_scheduler.MultiStepLR(
-        optimizer,
-        milestones=[int(num_epochs * m) for m in [0.5, 0.75]],
-        gamma=0.1,
-    )
-
-    best_acc, best_state = 0.0, None
-
-    for epoch in range(num_epochs):
-        student.train()
-        running_loss, preds_list, labels_list = 0.0, [], []
-
-        pbar = tqdm(train_loader, desc=f"RKD Epoch {epoch+1}/{num_epochs}")
-        for images, labels in pbar:
-            images, labels = images.to(device), labels.to(device)
-
-            with torch.no_grad():
-                t_feat_list = [
-                    t(images, return_features=True)[1] for t in teacher_models
-                ]
-
-            s_logits, s_feats = student(images, return_features=True)
-
-            l_s   = student_loss_fn(s_logits, labels)
-            l_rkd = torch.stack(
-                [rkd_loss_fn(tf, s_feats) for tf in t_feat_list]
-            ).mean()
-            loss = l_s + l_rkd
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-            preds_list.extend(
-                (torch.sigmoid(s_logits) > 0.5).float().squeeze().cpu().numpy()
-            )
-            labels_list.extend(labels.cpu().numpy())
-            pbar.set_postfix({'loss': f'{loss.item():.4f}'})
-
-        train_acc = accuracy_score(labels_list, preds_list)
-        val_m = _quick_eval(student, val_loader, device)
-        scheduler.step()
-
-        print(f"  Epoch {epoch+1}: loss={running_loss/len(train_loader):.4f}  "
-              f"train_acc={train_acc:.4f}  val_acc={val_m:.4f}")
-
-        if val_m > best_acc:
-            best_acc = val_m
-            best_state = copy.deepcopy(student.state_dict())
-            os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
-            torch.save(best_state, save_path)
-            print(f"    -> Saved best (val_acc={best_acc:.4f})")
-
-    student.load_state_dict(best_state)
-    return student
-
-
-# ═══════════════════════════════════════════════════════════════════
-# Helper
-# ═══════════════════════════════════════════════════════════════════
-
-@torch.no_grad()
-def _quick_eval(model, dataloader, device):
-    """Return validation accuracy only (for checkpoint selection)."""
-    model.eval()
-    num_classes = model.fc.out_features
-    correct, total = 0, 0
-    for images, labels in dataloader:
-        images = images.to(device)
-        logits = model(images)
-        if num_classes == 1:
-            preds = (torch.sigmoid(logits).squeeze() > 0.5).long()
-        else:
-            preds = logits.argmax(dim=1)
-        correct += (preds.cpu() == labels.long()).sum().item() 
-        total += labels.size(0)
-    return correct / max(total, 1)
+if __name__ == '__main__':
+    train()

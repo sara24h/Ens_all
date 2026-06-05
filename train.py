@@ -5,6 +5,7 @@ import torch
 import torch.optim as optim
 from dataset import Dataset_selector
 import torch.nn as nn
+from tqdm import tqdm
 from models import get_resnet50, DistillationWrapper
 from losses import ResponseKDLoss, FeatureKDLoss, RelationKDLoss
 
@@ -77,52 +78,43 @@ def train():
     
     # ۵. حلقه اصلی آموزش
     # ۵. حلقه اصلی آموزش
+    # ۵. حلقه اصلی آموزش
     for epoch in range(args.epochs):
         student.train()
-        running_loss = 0.0
-        correct, total = 0, 0
         
-        print(f"Starting training loop for Epoch {epoch+1}...") # این خط برای تست ورود به حلقه
+        # نوار پیشرفت را داخل حلقه اپوک قرار دهید
+        progress_bar = tqdm(selector.loader_train, desc=f"Epoch {epoch+1}/{args.epochs}", unit="batch")
         
-        # تغییر در این بخش:
-        for i, (images, labels) in enumerate(selector.loader_train):
-            if i % 10 == 0: 
-                print(f"Batch {i} is processing... Images shape: {images.shape}")
-            
+        for images, labels in progress_bar:
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
             
-            # ... بقیه کد شما ...
-            
-            # فوروارد معلم بدون محاسبه گرادیان
+            # --- عملیات فوروارد ---
             with torch.no_grad():
                 t_logits, t_features = teacher(images)
-                
-            # فوروارد دانش‌آموز
             s_logits, s_features = student(images)
             
-            # محاسبه تابع هزینه مخصوص روش تقطیر
+            # --- محاسبه Loss ---
             if args.kd_method == 'response':
                 loss = criterion(s_logits, t_logits, labels)
-            else:
+            elif args.kd_method == 'feature':
                 loss = criterion(s_logits, s_features, t_features, labels)
-                
+            else: # relation
+                loss = criterion(s_logits, s_features, t_features, labels) # متناسب با متد خود تنظیم کنید
+            
             loss.backward()
             optimizer.step()
             
-            running_loss += loss.item() * images.size(0)
-            _, predicted = s_logits.max(1)
-            total += labels.size(0)
-            correct += predicted.eq(labels).sum().item()
-            
-        epoch_loss = running_loss / total
-        epoch_acc = 100. * correct / total
-        print(f"Epoch [{epoch+1}/{args.epochs}] | Loss: {epoch_loss:.4f} | Acc: {epoch_acc:.2f}%")
+            # --- به‌روزرسانی نوار پیشرفت (بعد از محاسبه loss) ---
+            progress_bar.set_postfix(loss=f"{loss.item():.4f}")
         
-    # ذخیره وزن‌های نهایی دانش‌آموز
+    # ۶. ذخیره وزن‌ها (خارج از حلقه epoch قرار می‌گیرد)
     save_path = os.path.join(args.save_dir, f"student_{args.dataset}_{args.kd_method}.pth")
-    torch.save(student.model.state_dict(), save_path)
+    # دقت کنید اگر از DataParallel استفاده کردید، برای ذخیره درست باید از student.module.state_dict() استفاده کنید
+    state_dict = student.module.state_dict() if isinstance(student, nn.DataParallel) else student.state_dict()
+    torch.save(state_dict, save_path)
     print(f"Saved student model weights to {save_path}\n")
+        
 
 if __name__ == '__main__':
     train()

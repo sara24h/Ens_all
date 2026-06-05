@@ -4,6 +4,7 @@ import argparse
 import torch
 import torch.optim as optim
 from dataset import Dataset_selector
+import torch.nn as nn
 from models import get_resnet50, DistillationWrapper
 from losses import ResponseKDLoss, FeatureKDLoss, RelationKDLoss
 

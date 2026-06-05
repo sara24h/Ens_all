@@ -75,37 +75,40 @@ def train():
         criterion = RelationKDLoss(gamma=1.0)
         
     optimizer = optim.Adam(student.parameters(), lr=args.lr)
+
+    scaler = torch.cuda.amp.GradScaler()
     
+    # ۵. حلقه اصلی آموزش
     # ۵. حلقه اصلی آموزش
     # ۵. حلقه اصلی آموزش
     # ۵. حلقه اصلی آموزش
     for epoch in range(args.epochs):
         student.train()
-        
-        # نوار پیشرفت را داخل حلقه اپوک قرار دهید
         progress_bar = tqdm(selector.loader_train, desc=f"Epoch {epoch+1}/{args.epochs}", unit="batch")
         
         for images, labels in progress_bar:
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
             
-            # --- عملیات فوروارد ---
-            with torch.no_grad():
-                t_logits, t_features = teacher(images)
-            s_logits, s_features = student(images)
+            # --- شروع تغییرات Mixed Precision ---
+            with torch.cuda.amp.autocast():
+                # فوروارد معلم و دانش‌آموز داخل اتوکست
+                with torch.no_grad():
+                    t_logits, t_features = teacher(images)
+                s_logits, s_features = student(images)
+                
+                # محاسبه اتلاف
+                if args.kd_method == 'response':
+                    loss = criterion(s_logits, t_logits, labels)
+                else:
+                    loss = criterion(s_logits, s_features, t_features, labels)
             
-            # --- محاسبه Loss ---
-            if args.kd_method == 'response':
-                loss = criterion(s_logits, t_logits, labels)
-            elif args.kd_method == 'feature':
-                loss = criterion(s_logits, s_features, t_features, labels)
-            else: # relation
-                loss = criterion(s_logits, s_features, t_features, labels) # متناسب با متد خود تنظیم کنید
+            # استفاده از scaler برای backward
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            # --- پایان تغییرات ---
             
-            loss.backward()
-            optimizer.step()
-            
-            # --- به‌روزرسانی نوار پیشرفت (بعد از محاسبه loss) ---
             progress_bar.set_postfix(loss=f"{loss.item():.4f}")
         
     # ۶. ذخیره وزن‌ها (خارج از حلقه epoch قرار می‌گیرد)

@@ -11,15 +11,15 @@ class ResponseKDLoss(nn.Module):
         super(ResponseKDLoss, self).__init__()
         self.alpha = alpha
         self.temperature = temperature
-        self.ce_loss = nn.CrossEntropyLoss()
+        self.ce_loss = nn.BCEWithLogitsLoss()
         self.kl_loss = nn.KLDivLoss(reduction='batchmean')
 
     def forward(self, student_logits, teacher_logits, labels):
         loss_ce = self.ce_loss(student_logits, labels)
         
         # محاسبه گرادیان نرم لاجیت‌ها با دما
-        soft_student = F.log_softmax(student_logits / self.temperature, dim=1)
-        soft_teacher = F.softmax(teacher_logits / self.temperature, dim=1)
+        soft_student = F.log_softmax(student_logits / self.temperature, dim=0)
+        soft_teacher = F.softmax(teacher_logits / self.temperature, dim=0)
         
         loss_kl = self.kl_loss(soft_student, soft_teacher) * (self.temperature ** 2)
         return (1.0 - self.alpha) * loss_ce + self.alpha * loss_kl
@@ -32,7 +32,7 @@ class FeatureKDLoss(nn.Module):
     def __init__(self, beta=1.0):
         super(FeatureKDLoss, self).__init__()
         self.beta = beta
-        self.ce_loss = nn.CrossEntropyLoss()
+        self.ce_loss =nn.BCEWithLogitsLoss()
         self.mse_loss = nn.MSELoss()
 
     def forward(self, student_logits, student_features, teacher_features, labels):
@@ -56,7 +56,7 @@ class RelationKDLoss(nn.Module):
         # تبدیل فیچر مپ به بردار دوبعدی (batch, channels * H * W)
         flattened = features.view(features.size(0), -1)
         # نرمال‌سازی بردارها
-        norm_flat = F.normalize(flattened, p=2, dim=1)
+        norm_flat = F.normalize(flattened, p=2, dim=0)
         # تولید ماتریس رابطه نمونه به نمونه درون مینی‌بچ
         similarity_matrix = torch.mm(norm_flat, norm_flat.t())
         return similarity_matrix

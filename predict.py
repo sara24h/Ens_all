@@ -1,34 +1,49 @@
 """
 EnsemblePredictor — Load trained student models and run inference.
 
-Supports:
-  - Individual student predictions (Logits / AT / RKD)
-  - Soft Voting ensemble (Eq. 9)
+Student model assignments:
+  Student-Logits  ←  Teacher-200k  on  Dataset-200k   (Response-based KD)
+  Student-AT      ←  Teacher-140k  on  Dataset-140k   (Feature-based KD)
+  Student-RKD     ←  Teacher-190k  on  Dataset-190k   (Relation-based KD)
+
+Usage:
+    from predict import EnsemblePredictor
+
+    predictor = EnsemblePredictor({
+        'logits': './kd_checkpoints/student_logits_final.pth',   # trained on 200k
+        'at':     './kd_checkpoints/student_at_final.pth',       # trained on 140k
+        'rkd':    './kd_checkpoints/student_rkd_final.pth',      # trained on 190k
+    }, device='cuda')
+
+    probs, preds = predictor.predict(images, method='ensemble')
 """
 
 import torch
 from models import ResNet50WithFeatures
 
 
+# Which dataset each student was trained on (for logging / reference)
+STUDENT_DATASETS = {
+    'logits': '200k',   # Response-based KD  ← Teacher-200k
+    'at':     '140k',   # Feature-based KD   ← Teacher-140k
+    'rkd':    '190k',   # Relation-based KD  ← Teacher-190k
+}
+
+
 class EnsemblePredictor:
     """
     Load trained student checkpoints and perform inference.
 
-    Usage:
-        predictor = EnsemblePredictor({
-            'logits': './kd_checkpoints/student_logits_final.pth',
-            'at':     './kd_checkpoints/student_at_final.pth',
-            'rkd':    './kd_checkpoints/student_rkd_final.pth',
-        }, device='cuda')
-
-        probs, preds = predictor.predict(images, method='ensemble')
+    Supports:
+      - Individual student predictions (Logits / AT / RKD)
+      - Soft Voting ensemble (Eq. 9)
     """
 
     def __init__(self, model_paths, device='cuda'):
         """
         Args:
             model_paths: dict {kd_type: path_to_pth}
-                         keys are 'logits', 'at', 'rkd'
+                         keys: 'logits', 'at', 'rkd'
             device:      'cuda' or 'cpu'
         """
         self.device = device
@@ -47,7 +62,9 @@ class EnsemblePredictor:
             model.load_state_dict(state_dict, strict=False)
             model = model.to(device).eval()
             self.models[kd_type] = model
-            print(f"  Loaded {kd_type}: {path}")
+
+            ds = STUDENT_DATASETS.get(kd_type, '?')
+            print(f"  Loaded {kd_type} (trained on {ds}): {path}")
 
     @torch.no_grad()
     def predict(self, images, method='ensemble'):
@@ -85,7 +102,7 @@ class EnsemblePredictor:
         Get predictions from each student separately.
 
         Returns:
-            dict: {method_name: (probs, preds)}
+            dict: {method_name: {'probs': array, 'preds': array, 'dataset': str}}
         """
         images = images.to(self.device)
         results = {}
@@ -94,6 +111,10 @@ class EnsemblePredictor:
             logits = model(images)
             probs = torch.sigmoid(logits).squeeze().cpu().numpy()
             preds = (probs > 0.5).astype(int)
-            results[name] = (probs, preds)
+            results[name] = {
+                'probs': probs,
+                'preds': preds,
+                'trained_on': STUDENT_DATASETS.get(name, 'unknown'),
+            }
 
         return results

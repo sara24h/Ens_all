@@ -47,7 +47,7 @@ class Dataset_selector:
         realfake190k_root_dir=None,
         train_batch_size=32,
         eval_batch_size=32,
-        num_workers=0,
+        num_workers=4,
         pin_memory=True,
     ):
         if dataset_mode not in ['140k', '190k', '200k']:

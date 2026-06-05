@@ -42,15 +42,29 @@ def train():
     )
     
     # ۲. راه‌اندازی مدل معلم و قرار دادن در رپر هوک
+    # ۲. راه‌اندازی مدل معلم
     print("Loading Teacher model...")
     teacher_base = get_resnet50(num_classes=2, checkpoint_path=args.teacher_ckpt)
     teacher = DistillationWrapper(teacher_base).to(device)
-    teacher.eval() # مدل معلم همیشه در حالت eval است
+    teacher.eval()
+    
+    # --- اضافه کردن این بخش برای خالی کردن حافظه ---
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+    # ---------------------------------------------
     
     # ۳. راه‌اندازی مدل دانش‌آموز
     print("Initializing Student model (ResNet-50)...")
-    student_base = get_resnet50(num_classes=2, checkpoint_path=None)
+    student_base = get_resnet50(num_classes=2, checkpoint_path=None) # اینجا مدل جدید ساخته می‌شود
     student = DistillationWrapper(student_base).to(device)
+
+    # بعد از تعریف مدل
+    if torch.cuda.device_count() > 1:
+        print(f"Let's use {torch.cuda.device_count()} GPUs!")
+        student = nn.DataParallel(student)
+        
+    student = student.to(device)
     
     # ۴. تعیین تابع اتلاف براساس روش انتخابی
     if args.kd_method == 'response':

@@ -18,7 +18,15 @@ Usage:
     probs, preds = predictor.predict(images, method='ensemble')
 """
 
+import os
+import sys
 import torch
+
+# Add project root to Python path
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from models import ResNet50WithFeatures
 
 
@@ -39,19 +47,19 @@ class EnsemblePredictor:
       - Soft Voting ensemble (Eq. 9)
     """
 
-    def __init__(self, model_paths, device='cuda'):
+    def __init__(self, model_paths, device='cuda', num_classes='auto'):
         """
         Args:
             model_paths: dict {kd_type: path_to_pth}
                          keys: 'logits', 'at', 'rkd'
             device:      'cuda' or 'cpu'
+            num_classes: 'auto' | int — 'auto' detects from checkpoint
         """
         self.device = device
         self.models = {}
 
         for kd_type, path in model_paths.items():
-            model = ResNet50WithFeatures(num_classes=1, pretrained=False)
-            state_dict = torch.load(path, map_location=device)
+            state_dict = torch.load(path, map_location=device, weights_only=False)
 
             # Handle DataParallel prefix
             if any(k.startswith('module.') for k in state_dict.keys()):
@@ -59,12 +67,21 @@ class EnsemblePredictor:
                     k.replace('module.', ''): v for k, v in state_dict.items()
                 }
 
+            # Auto-detect num_classes
+            if num_classes == 'auto' and 'fc.weight' in state_dict:
+                nc = state_dict['fc.weight'].shape[0]
+            elif num_classes != 'auto':
+                nc = num_classes
+            else:
+                nc = 1
+
+            model = ResNet50WithFeatures(num_classes=nc, pretrained=False)
             model.load_state_dict(state_dict, strict=False)
             model = model.to(device).eval()
             self.models[kd_type] = model
 
             ds = STUDENT_DATASETS.get(kd_type, '?')
-            print(f"  Loaded {kd_type} (trained on {ds}): {path}")
+            print(f"  Loaded {kd_type} (trained on {ds}, num_classes={nc}): {path}")
 
     @torch.no_grad()
     def predict(self, images, method='ensemble'):

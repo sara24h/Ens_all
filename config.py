@@ -47,9 +47,9 @@ RKD_ANGLE_WEIGHT    = 2.0
 # from a different source, making the ensemble more diverse.
 
 TEACHER_PATHS = {
-    '200k': '/path/to/teacher_200k_best.pth',   # used by Student-Logits
-    '140k': '/path/to/teacher_140k_best.pth',   # used by Student-AT
-    '190k': '/path/to/teacher_190k_best.pth',   # used by Student-RKD
+    '200k': '/kaggle/input/datasets/sarah20079/teacher-model-best-200k/KDFS-Pearson-2/teacher_dir/teacher_model_best.pth',   # used by Student-Logits
+    '140k': '/kaggle/input/models/sara24h/teacher_model_best/pytorch/default/1/teacher_model_best.pth',   # used by Student-AT
+    '190k': '/kaggle/input/datasets/sara24h/kdfs-190k-transfer-learning-data/KDFS-Pearson-2/teacher_dir/teacher_model_best.pth',   # used by Student-RKD
 }
 
 DATASET_PATHS = {

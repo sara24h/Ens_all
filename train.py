@@ -6,8 +6,8 @@ Training loops for the three Knowledge Distillation methods.
   3. train_rkd()     — Relation-based KD  (Eq. 8)
 
 Each function supports:
-  - Single-teacher mode
-  - Multi-teacher mode (distillation loss averaged over all teachers)
+  - Single-teacher mode  (one teacher on its dataset)
+  - Multi-teacher mode   (distillation loss averaged over all teachers)
 """
 
 import os
@@ -34,7 +34,7 @@ def train_logits(teacher_models, train_loader, val_loader,
     Eq. 3: L = α · L_S + β · L_logits
 
     Args:
-        teacher_models: list of teacher models (or single model)
+        teacher_models: list of teacher models OR a single model
         train_loader:   training DataLoader
         val_loader:     validation DataLoader
         num_epochs:     number of training epochs

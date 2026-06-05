@@ -311,6 +311,6 @@ def _quick_eval(model, dataloader, device):
             preds = (torch.sigmoid(logits).squeeze() > 0.5).long()
         else:
             preds = logits.argmax(dim=1)
-        correct += (preds.cpu() == labels.long()).sum().item()
+        correct += (preds.cpu() == labels.long()).sum().item() 
         total += labels.size(0)
     return correct / max(total, 1)

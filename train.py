@@ -11,12 +11,18 @@ Each function supports:
 """
 
 import os
+import sys
 import copy
 import torch
 import torch.optim as optim
 import numpy as np
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score
+
+# Add project root to Python path
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from models import ResNet50WithFeatures
 from losses import StudentLoss, LogitsDistillationLoss, AttentionTransferLoss, RKDLoss
@@ -28,7 +34,8 @@ from losses import StudentLoss, LogitsDistillationLoss, AttentionTransferLoss, R
 
 def train_logits(teacher_models, train_loader, val_loader,
                  num_epochs=50, lr=0.01, alpha=1.0, beta=0.5,
-                 device='cuda', save_path='student_logits_best.pth'):
+                 num_classes=1, device='cuda',
+                 save_path='student_logits_best.pth'):
     """
     Train student with Response-based KD (Logits MSE).
     Eq. 3: L = α · L_S + β · L_logits
@@ -49,7 +56,7 @@ def train_logits(teacher_models, train_loader, val_loader,
     print("=" * 70)
 
     # ── Setup ──
-    student = ResNet50WithFeatures(num_classes=1, pretrained=True).to(device)
+    student = ResNet50WithFeatures(num_classes=num_classes, pretrained=True).to(device)
     if not isinstance(teacher_models, list):
         teacher_models = [teacher_models]
     for t in teacher_models:
@@ -124,7 +131,7 @@ def train_logits(teacher_models, train_loader, val_loader,
 # ═══════════════════════════════════════════════════════════════════
 
 def train_at(teacher_models, train_loader, val_loader,
-             num_epochs=50, lr=0.01, device='cuda',
+             num_epochs=50, lr=0.01, num_classes=1, device='cuda',
              save_path='student_at_best.pth'):
     """
     Train student with Feature-based KD (Attention Transfer).
@@ -134,7 +141,7 @@ def train_at(teacher_models, train_loader, val_loader,
     print("  Feature-based KD (Attention Transfer) — Eq. 5")
     print("=" * 70)
 
-    student = ResNet50WithFeatures(num_classes=1, pretrained=True).to(device)
+    student = ResNet50WithFeatures(num_classes=num_classes, pretrained=True).to(device)
     if not isinstance(teacher_models, list):
         teacher_models = [teacher_models]
     for t in teacher_models:
@@ -209,7 +216,8 @@ def train_at(teacher_models, train_loader, val_loader,
 def train_rkd(teacher_models, train_loader, val_loader,
               num_epochs=50, lr=0.01,
               distance_weight=1.0, angle_weight=2.0,
-              device='cuda', save_path='student_rkd_best.pth'):
+              num_classes=1, device='cuda',
+              save_path='student_rkd_best.pth'):
     """
     Train student with Relation-based KD (RKD).
     Eq. 8: L = L_S + L_RKD
@@ -218,7 +226,7 @@ def train_rkd(teacher_models, train_loader, val_loader,
     print("  Relation-based KD (RKD) — Eq. 8")
     print("=" * 70)
 
-    student = ResNet50WithFeatures(num_classes=1, pretrained=True).to(device)
+    student = ResNet50WithFeatures(num_classes=num_classes, pretrained=True).to(device)
     if not isinstance(teacher_models, list):
         teacher_models = [teacher_models]
     for t in teacher_models:
@@ -294,11 +302,15 @@ def train_rkd(teacher_models, train_loader, val_loader,
 def _quick_eval(model, dataloader, device):
     """Return validation accuracy only (for checkpoint selection)."""
     model.eval()
+    num_classes = model.fc.out_features
     correct, total = 0, 0
     for images, labels in dataloader:
         images = images.to(device)
         logits = model(images)
-        preds = (torch.sigmoid(logits).squeeze() > 0.5).long()
+        if num_classes == 1:
+            preds = (torch.sigmoid(logits).squeeze() > 0.5).long()
+        else:
+            preds = logits.argmax(dim=1)
         correct += (preds.cpu() == labels.long()).sum().item()
         total += labels.size(0)
     return correct / max(total, 1)

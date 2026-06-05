@@ -1,79 +1,40 @@
-"""
-models.py
-=========
-ResNet-50 wrapper with intermediate feature & attention-map extraction.
-
-Used by both teacher and student networks in all three KD methods:
-  - Response-based (Logits)  → needs logits only
-  - Feature-based (AT)       → needs attention maps from layer1–4
-  - Relation-based (RKD)     → needs penultimate features (avgpool output)
-"""
-
+# models.py
 import torch
 import torch.nn as nn
-from torchvision import models
+import torchvision.models as models
 
-
-class ResNet50WithFeatures(nn.Module):
+def get_resnet50(num_classes=2, checkpoint_path=None):
     """
-    ResNet-50 that can optionally return:
-      - penultimate features  [B, 2048]   (for RKD)
-      - attention maps from layers 1-4     (for AT)
-
-    Forward signature
-    -----------------
-    >>> logits = model(x)
-    >>> logits, features = model(x, return_features=True)
-    >>> logits, attn_maps = model(x, return_attention=True)
-    >>> logits, features, attn_maps = model(x, return_features=True, return_attention=True)
+    ساخت مدل رزنیت ۵۰ با قابلیت بارگذاری چک‌پوینت معلم
     """
+    model = models.resnet50(weights=None)
+    model.fc = nn.Linear(model.fc.in_features, num_classes)
+    
+    if checkpoint_path:
+        state_dict = torch.load(checkpoint_path, map_location='cpu')
+        # در صورت وجود کلید متفرقه هدایت مستقیم به استیت دیکشنری اصلی انجام می‌شود
+        if 'state_dict' in state_dict:
+            state_dict = state_dict['state_dict']
+        model.load_state_dict(state_dict)
+        print(f"Successfully loaded checkpoint from {checkpoint_path}")
+    return model
 
-    def __init__(self, num_classes: int = 1, pretrained: bool = True):
-        super().__init__()
+class DistillationWrapper(nn.Module):
+    """
+    رپری روی رزنیت ۵۰ برای دسترسی آسان به فیچرهای لایه ۴ و لاجیت‌های خروجی مدل
+    """
+    def __init__(self, model):
+        super(DistillationWrapper, self).__init__()
+        self.model = model
+        self.features = None
+        
+        # ثبت هوک روی آخرین بلوک کانولوشنی رزنیت ۵۰ (layer4)
+        self.model.layer4.register_forward_hook(self._hook)
 
-        backbone = models.resnet50(
-            weights=models.ResNet50_Weights.DEFAULT if pretrained else None
-        )
+    def _hook(self, module, input, output):
+        # ذخیره فیچر مپ میانی خروجی لایه ۴
+        self.features = output
 
-        # --- copy sub-modules ---
-        self.conv1   = backbone.conv1
-        self.bn1     = backbone.bn1
-        self.relu    = backbone.relu
-        self.maxpool = backbone.maxpool
-        self.layer1  = backbone.layer1     # 256 ch
-        self.layer2  = backbone.layer2     # 512 ch
-        self.layer3  = backbone.layer3     # 1024 ch
-        self.layer4  = backbone.layer4     # 2048 ch
-        self.avgpool = backbone.avgpool
-        self.fc      = nn.Linear(backbone.fc.in_features, num_classes)
-
-        self.feature_channels = [256, 512, 1024, 2048]
-
-    def forward(self, x,
-                return_features: bool = False,
-                return_attention: bool = False):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.maxpool(x)
-
-        attention_maps = []
-        for layer in (self.layer1, self.layer2, self.layer3, self.layer4):
-            x = layer(x)
-            if return_attention:
-                attention_maps.append(x)
-
-        features = self.avgpool(x)
-        features = torch.flatten(features, 1)   # [B, 2048]
-        logits   = self.fc(features)             # [B, num_classes]
-
-        # --- build return tuple ---
-        if not return_features and not return_attention:
-            return logits
-
-        parts = [logits]
-        if return_features:
-            parts.append(features)
-        if return_attention:
-            parts.append(attention_maps)
-        return tuple(parts)
+    def forward(self, x):
+        logits = self.model(x)
+        return logits, self.features

@@ -28,15 +28,15 @@ def train():
     # متغیرهای مسیرها را بر اساس محیط سیستم یا کگل خود بازتنظیم کنید
     selector = Dataset_selector(
         dataset_mode=args.dataset,
-        realfake140k_train_csv='/kaggle/input/140k-real-and-fake-faces/train.csv',
-        realfake140k_valid_csv='/kaggle/input/140k-real-and-fake-faces/valid.csv',
-        realfake140k_test_csv='/kaggle/input/140k-real-and-fake-faces/test.csv',
+        realfake140k_train_csv='/kaggle/input/datasets/xhlulu/140k-real-and-fake-faces/train.csv',
+        realfake140k_valid_csv='/kaggle/input/datasets/xhlulu/140k-real-and-fake-faces/valid.csv',
+        realfake140k_test_csv='/kaggle/input/datasets/xhlulu/140k-real-and-fake-faces/test.csv',
         realfake140k_root_dir='/kaggle/input/140k-real-and-fake-faces',
-        realfake200k_train_csv='/kaggle/input/undersampled-200k/balanced_unique_200k_dataset/train_labels.csv',
-        realfake200k_val_csv='/kaggle/input/undersampled-200k/balanced_unique_200k_dataset/val_labels.csv',
-        realfake200k_test_csv='/kaggle/input/undersampled-200k/balanced_unique_200k_dataset/test_labels.csv',
-        realfake200k_root_dir='/kaggle/input/undersampled-200k/balanced_unique_200k_dataset',
-        realfake190k_root_dir='/kaggle/input/deepfake-and-real-images/Dataset',
+        realfake200k_train_csv='/kaggle/input/datasets/saraaskari/undersampled-200k/balanced_unique_200k_dataset/train_labels.csv',
+        realfake200k_val_csv='/kaggle/input/datasets/saraaskari/undersampled-200k/balanced_unique_200k_dataset/val_labels.csv',
+        realfake200k_test_csv='/kaggle/input/datasets/saraaskari/undersampled-200k/balanced_unique_200k_dataset/test_labels.csv',
+        realfake200k_root_dir='/kaggle/input/datasets/saraaskari/undersampled-200k/balanced_unique_200k_dataset',
+        realfake190k_root_dir='/kaggle/input/datasets/manjilkarki/deepfake-and-real-images/Dataset',
         train_batch_size=args.batch_size,
         eval_batch_size=args.batch_size
     )

@@ -4,10 +4,14 @@ import torch.nn as nn
 import torchvision.models as models
 
 def get_resnet50(num_classes=2, checkpoint_path=None):
-    """
-    ساخت مدل رزنیت ۵۰ با قابلیت بارگذاری چک‌پوینت معلم
-    """
     model = models.resnet50(weights=None)
+    
+    # اگر چک‌پوینت دارید، بررسی کنید که آیا مدل تک‌کلاسه است یا دوکلاسه
+    if checkpoint_path:
+        state_dict = torch.load(checkpoint_path, map_location='cpu')
+        if 'fc.weight' in state_dict and state_dict['fc.weight'].shape[0] == 1:
+            num_classes = 1 # انطباق با ساختار معلم
+            
     model.fc = nn.Linear(model.fc.in_features, num_classes)
     
     if checkpoint_path:

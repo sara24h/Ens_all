@@ -43,13 +43,13 @@ def train():
     
     # ۲. راه‌اندازی مدل معلم و قرار دادن در رپر هوک
     print("Loading Teacher model...")
-    teacher_base = get_resnet50(num_classes=2, checkpoint_path=args.teacher_ckpt)
+    teacher_base = get_resnet50(num_classes=1, checkpoint_path=args.teacher_ckpt)
     teacher = DistillationWrapper(teacher_base).to(device)
     teacher.eval() # مدل معلم همیشه در حالت eval است
     
     # ۳. راه‌اندازی مدل دانش‌آموز
     print("Initializing Student model (ResNet-50)...")
-    student_base = get_resnet50(num_classes=2, checkpoint_path=None)
+    student_base = get_resnet50(num_classes=1, checkpoint_path=None)
     student = DistillationWrapper(student_base).to(device)
     
     # ۴. تعیین تابع اتلاف براساس روش انتخابی

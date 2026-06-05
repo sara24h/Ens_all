@@ -15,7 +15,13 @@ teacher-dataset pair, making the ensemble more diverse and powerful.
 """
 
 import os
+import sys
 import torch
+
+# Add project root to Python path
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from utils import load_model
 from train import train_logits, train_at, train_rkd
@@ -98,6 +104,11 @@ def run_pipeline(
 
     print(f"  Teachers loaded: {list(teacher_models.keys())}")
 
+    # Auto-detect num_classes from first teacher's FC layer
+    first_teacher = next(iter(teacher_models.values()))
+    num_classes = first_teacher.fc.out_features
+    print(f"  Detected num_classes={num_classes} from teacher FC layer")
+
     # ────────────────────────────────────────────────────────────
     # STEP 2: Verify DataLoaders
     # ────────────────────────────────────────────────────────────
@@ -137,7 +148,7 @@ def run_pipeline(
             train_loader=ds.loader_train,
             val_loader=ds.loader_val,
             num_epochs=num_epochs, lr=lr, alpha=alpha, beta=beta,
-            device=device,
+            num_classes=num_classes, device=device,
             save_path=os.path.join(save_dir, 'student_logits_best.pth'),
         )
     else:
@@ -162,7 +173,7 @@ def run_pipeline(
             train_loader=ds.loader_train,
             val_loader=ds.loader_val,
             num_epochs=num_epochs, lr=lr,
-            device=device,
+            num_classes=num_classes, device=device,
             save_path=os.path.join(save_dir, 'student_at_best.pth'),
         )
     else:
@@ -188,7 +199,7 @@ def run_pipeline(
             val_loader=ds.loader_val,
             num_epochs=num_epochs, lr=lr,
             distance_weight=rkd_dist_w, angle_weight=rkd_angle_w,
-            device=device,
+            num_classes=num_classes, device=device,
             save_path=os.path.join(save_dir, 'student_rkd_best.pth'),
         )
     else:

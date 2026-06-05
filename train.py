@@ -85,14 +85,23 @@ def train():
     optimizer = optim.Adam(student.parameters(), lr=args.lr)
     
     # ۵. حلقه اصلی آموزش
+    # ۵. حلقه اصلی آموزش
     for epoch in range(args.epochs):
         student.train()
         running_loss = 0.0
         correct, total = 0, 0
         
-        for images, labels in selector.loader_train:
+        print(f"Starting training loop for Epoch {epoch+1}...") # این خط برای تست ورود به حلقه
+        
+        # تغییر در این بخش:
+        for i, (images, labels) in enumerate(selector.loader_train):
+            if i % 10 == 0: 
+                print(f"Batch {i} is processing... Images shape: {images.shape}")
+            
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
+            
+            # ... بقیه کد شما ...
             
             # فوروارد معلم بدون محاسبه گرادیان
             with torch.no_grad():

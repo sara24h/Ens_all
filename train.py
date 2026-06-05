@@ -56,15 +56,22 @@ def train():
     # ---------------------------------------------
     
     # ۳. راه‌اندازی مدل دانش‌آموز
+    # ۳. راه‌اندازی مدل دانش‌آموز
     print("Initializing Student model (ResNet-50)...")
-    student_base = get_resnet50(num_classes=2, checkpoint_path=None) # اینجا مدل جدید ساخته می‌شود
-    student = DistillationWrapper(student_base).to(device)
-
-    # بعد از تعریف مدل
+    student_base = get_resnet50(num_classes=2, checkpoint_path=None)
+    
+    # ابتدا مدل را به GPU اول منتقل کنید (این کار باعث رزرو حافظه می‌شود)
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    student_base = student_base.to(device)
+    
+    # سپس آن را به رپر داده و موازی‌سازی کنید
+    student = DistillationWrapper(student_base)
+    
     if torch.cuda.device_count() > 1:
         print(f"Let's use {torch.cuda.device_count()} GPUs!")
         student = nn.DataParallel(student)
-        
+    
+    # حالا کل مدلِ موازی‌سازی شده را به همه کارت‌ها بفرستید
     student = student.to(device)
     
     # ۴. تعیین تابع اتلاف براساس روش انتخابی

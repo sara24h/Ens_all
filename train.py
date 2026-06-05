@@ -69,7 +69,7 @@ def train():
     
     if torch.cuda.device_count() > 1:
         print(f"Let's use {torch.cuda.device_count()} GPUs!")
-        student = nn.DataParallel(student)
+        #student = nn.DataParallel(student)
     
     # حالا کل مدلِ موازی‌سازی شده را به همه کارت‌ها بفرستید
     student = student.to(device)
